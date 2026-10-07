@@ -91,6 +91,7 @@ def route_table() -> list[Route]:
         Route("GET", "/api/assignments/by-chute", "assignments grouped by chute", "handle_assignments_by_chute"),
         Route("GET", "/api/assignments/{flight}", "read one assignment", "handle_get_assignment"),
         Route("GET", "/api/assignments/{flight}/history", "assignment history", "handle_assignment_history"),
+        Route("GET", "/api/assignments/{flight}/generations", "allocation and schedule generations with evidence", "handle_assignment_generations"),
         Route("POST", "/api/assignments/{flight}/confirm", "confirm a generation", "handle_confirm_assignment"),
         # -- tag ----------------------------------------------------------
         Route("POST", "/api/tag/read", "propose a barcode read", "handle_tag_read"),

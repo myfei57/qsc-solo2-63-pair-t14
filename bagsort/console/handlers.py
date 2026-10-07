@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from bagsort.checkin.entries import Entry
+from bagsort.generations import Adoption
 from bagsort.model.entities import Flight, Reading
 from bagsort.model.validate import validate_flight
 from bagsort.reporting import csv_export
@@ -384,11 +385,30 @@ def handle_assignment_history(server, request: Request) -> Response:
     return json_response([assignment.as_dict() for assignment in history])
 
 
+def handle_assignment_generations(server, request: Request) -> Response:
+    """Chute allocation and flight schedule generations, with replay evidence."""
+
+    return json_response(_plant(server).generations.report(request.param("flight")))
+
+
 def handle_confirm_assignment(server, request: Request) -> Response:
-    assignment = _plant(server).chutes.ensure_current(
-        request.param("flight"), request.int_field("generation")
+    plant = _plant(server)
+    flight_id = request.param("flight")
+    presented = request.int_field("generation")
+    policy = request.str_field("policy", "reject") or request.query_str("policy", "reject")
+    verdict = plant.generations.check_assignment(flight_id, presented, policy)
+    if isinstance(verdict, Adoption):
+        return json_response({"confirmed": True, **verdict.as_dict()})
+    assignment = verdict.assignment
+    return json_response(
+        {
+            "confirmed": True,
+            "adopted": False,
+            "presented_generation": presented,
+            "current_generation": assignment.generation,
+            **assignment.as_dict(),
+        }
     )
-    return json_response({"confirmed": True, **assignment.as_dict()})
 
 
 # ---------------------------------------------------------------------------
@@ -539,13 +559,20 @@ def handle_recheck_deadline(server, request: Request) -> Response:
     plant = _plant(server)
     flight_id = request.param("flight")
     generation = request.query_int("generation", 0)
+    adopted = None
     if generation:
-        plant.schedule.ensure_current(flight_id, generation)
+        policy = request.query_str("policy", "reject")
+        verdict = plant.generations.check_schedule(flight_id, generation, policy)
+        if isinstance(verdict, Adoption):
+            adopted = verdict.as_dict()
+            generation = verdict.current_generation
     return json_response(
         {
             "flight_id": flight_id,
             "deadline": plant.recheck.deadline(flight_id),
             "schedule": plant.schedule.current(flight_id).as_dict(),
+            "adopted_notice": adopted["adopted_notice"] if adopted else None,
+            "presented_generation": generation if generation else None,
         }
     )
 

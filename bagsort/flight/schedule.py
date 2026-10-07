@@ -1,8 +1,9 @@
 """Flight schedule revisions and the expiring schedule generation.
 
-A revision bumps the generation. Anything that captured the previous generation
-is then refused, so a deadline or recheck plan computed against an old schedule
-cannot be applied to the new one.
+A revision bumps the generation. Whether a captured generation may still act is
+decided by :class:`bagsort.generations.guard.GenerationGuard`, so a deadline or
+recheck plan computed against an old schedule is refused (or explicitly moved
+on) rather than silently applied to the new one.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from bagsort.clock import Clock
-from bagsort.errors import StaleError
 from bagsort.model.entities import Flight
 from bagsort.model.errors import unknown_flight
 from bagsort.store.store import Store
@@ -61,15 +61,6 @@ class ScheduleBoard:
             cutoff_at=updated.cutoff_at,
             generation=updated.schedule_generation,
         )
-
-    def ensure_current(self, flight_id: str, generation: int) -> Schedule:
-        schedule = self.current(flight_id)
-        if generation != schedule.generation:
-            raise StaleError(
-                f"schedule generation {generation} for {flight_id!r} is stale; "
-                f"current is {schedule.generation}"
-            )
-        return schedule
 
     def _flight(self, flight_id: str) -> Flight:
         flight = self._store.state().flights.get(flight_id)

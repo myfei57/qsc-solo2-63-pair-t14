@@ -19,6 +19,7 @@ from bagsort.flight.book import FlightBook
 from bagsort.flight.close import FlightCloser
 from bagsort.flight.mapping import BagMapping
 from bagsort.flight.schedule import ScheduleBoard
+from bagsort.generations import GenerationEvidence, GenerationGuard
 from bagsort.ids import IdFactory
 from bagsort.inject.injector import Injector
 from bagsort.model.entities import Bag, Flight, Reading, SortRecord
@@ -68,6 +69,7 @@ class Plant:
     belt: Belt
     quota: QuotaBook
     audit: AuditChain
+    generations: GenerationGuard
     report: PlantReport
 
     @property
@@ -107,6 +109,7 @@ class Plant:
         belt = Belt(store, clock, IdFactory("cmd"))
 
         audit = AuditChain(store, clock, handling_line())
+        generations = GenerationGuard(GenerationEvidence(store), audit)
         audit_subscriber = _AuditSubscriber(audit)
         for topic in (
             "bag.checked_in",
@@ -146,6 +149,7 @@ class Plant:
             belt=belt,
             quota=quota,
             audit=audit,
+            generations=generations,
             report=report,
         )
 

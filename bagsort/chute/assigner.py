@@ -1,14 +1,16 @@
 """Chute assignment with a generation counter.
 
-Re-assigning a flight to a different chute bumps the generation. A caller that
-captured the old generation is refused, which is how a stale in-memory routing
-cache is prevented from sending bags to a chute that has already been closed.
+Re-assigning a flight to a different chute bumps the generation. Whether a
+request may act on a captured generation is decided by
+:class:`bagsort.generations.guard.GenerationGuard`, which is what refuses a
+stale in-memory routing cache before it can send bags to a chute that has
+already been closed.
 """
 
 from __future__ import annotations
 
 from bagsort.clock import Clock
-from bagsort.errors import StaleError, ValidationError
+from bagsort.errors import ValidationError
 from bagsort.model.entities import ChuteAssignment
 from bagsort.model.errors import unknown_flight
 from bagsort.store.store import Store
@@ -50,15 +52,6 @@ class ChuteAssigner:
         assignment = self.current(flight_id)
         if assignment is None:
             raise ValidationError(f"flight {flight_id!r} has no chute assignment")
-        return assignment
-
-    def ensure_current(self, flight_id: str, generation: int) -> ChuteAssignment:
-        assignment = self.require(flight_id)
-        if assignment.generation != generation:
-            raise StaleError(
-                f"chute assignment generation {generation} for {flight_id!r} is stale; "
-                f"current is {assignment.generation}"
-            )
         return assignment
 
     def by_chute(self) -> dict[str, list[str]]:

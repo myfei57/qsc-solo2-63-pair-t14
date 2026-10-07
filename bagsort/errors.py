@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class ControlError(Exception):
     """Base class for every error raised by the control service."""
 
     code = "control_error"
 
-    def as_dict(self) -> dict[str, str]:
-        return {"error": str(self), "code": self.code}
+    def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.details: dict[str, Any] = dict(details or {})
+
+    def as_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"error": str(self), "code": self.code}
+        if self.details:
+            payload["details"] = self.details
+        return payload
 
 
 class ValidationError(ControlError):

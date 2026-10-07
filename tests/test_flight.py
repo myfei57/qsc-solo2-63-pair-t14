@@ -80,9 +80,9 @@ def test_schedule_revision_bumps_the_generation(plant, flight):
     assert first.generation == 1
     revised = plant.schedule.revise(flight.id, "2024-01-02T00:00:00Z")
     assert revised.generation == 2
-    assert plant.schedule.ensure_current(flight.id, 2).cutoff_at == "2024-01-02T00:00:00Z"
+    assert plant.generations.check_schedule(flight.id, 2).cutoff_at == "2024-01-02T00:00:00Z"
     with pytest.raises(StaleError):
-        plant.schedule.ensure_current(flight.id, 1)
+        plant.generations.check_schedule(flight.id, 1)
 
 
 def test_close_drains_before_marking_closed(plant, flight):
