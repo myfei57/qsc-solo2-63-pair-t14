@@ -91,6 +91,16 @@ def apply_entry(state: State, kind: str, payload: dict[str, Any]) -> None:
     if kind == "flight.put":
         flight = Flight.from_dict(payload["flight"])
         state.flights[flight.id] = flight
+    elif kind == "flight.schedule":
+        flight_id = str(payload["flight_id"])
+        existing = state.flights.get(flight_id)
+        if existing is not None:
+            state.flights[flight_id] = existing.evolved(
+                cutoff_at=str(payload.get("cutoff_at", existing.cutoff_at)),
+                schedule_generation=int(
+                    payload.get("generation", existing.schedule_generation)
+                ),
+            )
     elif kind == "flight.remove":
         state.flights.pop(str(payload["flight_id"]), None)
         state.mappings = {

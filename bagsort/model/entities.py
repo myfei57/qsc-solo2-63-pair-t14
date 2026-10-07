@@ -135,6 +135,7 @@ class ChuteAssignment:
     chute_id: str
     generation: int = 1
     updated_at: str = ""
+    schedule_generation: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -142,6 +143,7 @@ class ChuteAssignment:
             "chute_id": self.chute_id,
             "generation": self.generation,
             "updated_at": self.updated_at,
+            "schedule_generation": self.schedule_generation,
         }
 
     @classmethod
@@ -151,6 +153,7 @@ class ChuteAssignment:
             chute_id=str(raw.get("chute_id", "")),
             generation=int(raw.get("generation", 1)),
             updated_at=str(raw.get("updated_at", "")),
+            schedule_generation=int(raw.get("schedule_generation", 0)),
         )
 
 

@@ -13,12 +13,14 @@ from bagsort.audit.chain import AuditChain
 from bagsort.belt.belt import Belt
 from bagsort.checkin.desk import Desk
 from bagsort.clock import Clock
-from bagsort.errors import ConflictError
+from bagsort.errors import ConflictError, ValidationError
 from bagsort.events.bus import EventBus
 from bagsort.flight.book import FlightBook
 from bagsort.flight.close import FlightCloser
+from bagsort.flight.history import ScheduleHistory
 from bagsort.flight.mapping import BagMapping
 from bagsort.flight.schedule import ScheduleBoard
+from bagsort.generations import REJECT, GenerationGuard
 from bagsort.ids import IdFactory
 from bagsort.inject.injector import Injector
 from bagsort.model.entities import Bag, Flight, Reading, SortRecord
@@ -58,9 +60,11 @@ class Plant:
     book: FlightBook
     mapping: BagMapping
     schedule: ScheduleBoard
+    schedule_history: ScheduleHistory
     closer: FlightCloser
     chutes: ChuteAssigner
     chute_history: AssignmentHistory
+    generations: GenerationGuard
     sorter: Sorter
     injector: Injector
     desk: Desk
@@ -95,16 +99,6 @@ class Plant:
         reads = ReadHistory(store)
         book = FlightBook(store, clock)
         mapping = BagMapping(store, clock)
-        schedule = ScheduleBoard(store, clock)
-        chutes = ChuteAssigner(store, clock)
-        chute_history = AssignmentHistory(store)
-        sorter = Sorter(store, mapping, chutes, clock, VerdictTracker())
-        injector = Injector(store, book, sorter, clock)
-        quota = QuotaBook(store, clock)
-        desk = Desk(store, reader, book, mapping, injector, quota, clock, handling_line())
-        closer = FlightCloser(book)
-        recheck = RecheckQueue(store, book, clock)
-        belt = Belt(store, clock, IdFactory("cmd"))
 
         audit = AuditChain(store, clock, handling_line())
         audit_subscriber = _AuditSubscriber(audit)
@@ -114,11 +108,27 @@ class Plant:
             "bag.diverted",
             "bag.recheck_enqueued",
             "flight.closed",
+            "flight.schedule_revised",
             "chute.assigned",
             "belt.switched",
             "bag.remapped",
         ):
             bus.subscribe(topic, audit_subscriber)
+
+        chute_history = AssignmentHistory(store)
+        schedule_history = ScheduleHistory(store)
+        generations = GenerationGuard(
+            store, audit, chute_history, schedule_history, mode=REJECT
+        )
+        schedule = ScheduleBoard(store, clock, generations)
+        chutes = ChuteAssigner(store, clock, generations)
+        sorter = Sorter(store, mapping, chutes, clock, VerdictTracker())
+        injector = Injector(store, book, sorter, clock)
+        quota = QuotaBook(store, clock)
+        desk = Desk(store, reader, book, mapping, injector, quota, clock, handling_line())
+        closer = FlightCloser(book)
+        recheck = RecheckQueue(store, book, clock)
+        belt = Belt(store, clock, IdFactory("cmd"))
 
         report = PlantReport(
             store, book, chutes, belt, quota, audit, namespace, handling_line()
@@ -136,9 +146,11 @@ class Plant:
             book=book,
             mapping=mapping,
             schedule=schedule,
+            schedule_history=schedule_history,
             closer=closer,
             chutes=chutes,
             chute_history=chute_history,
+            generations=generations,
             sorter=sorter,
             injector=injector,
             desk=desk,
@@ -165,7 +177,13 @@ class Plant:
 
     def assign_chute(self, flight_id: str, chute_id: str):
         assignment = self.chutes.assign(flight_id, chute_id)
-        self.bus.publish("chute.assigned", flight_id=flight_id, chute_id=chute_id)
+        self.bus.publish(
+            "chute.assigned",
+            flight_id=flight_id,
+            chute_id=chute_id,
+            generation=assignment.generation,
+            schedule_generation=assignment.schedule_generation,
+        )
         return assignment
 
     def read_barcode(self, barcode: str) -> Reading:
@@ -213,7 +231,24 @@ class Plant:
         return self.bag(bag_id)
 
     def revise_schedule(self, flight_id: str, cutoff_at: str):
-        return self.schedule.revise(flight_id, cutoff_at)
+        schedule = self.schedule.revise(flight_id, cutoff_at)
+        self.bus.publish(
+            "flight.schedule_revised",
+            flight_id=flight_id,
+            cutoff_at=schedule.cutoff_at,
+            generation=schedule.generation,
+        )
+        return schedule
+
+    def set_generation_policy(self, mode: str) -> dict[str, object]:
+        try:
+            self.generations.set_mode(mode)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        return self.generations.describe_policy()
+
+    def generation_policy(self) -> dict[str, object]:
+        return self.generations.describe_policy()
 
     def close_flight(self, flight_id: str) -> Flight:
         flight = self.closer.close(flight_id, self.injector)
@@ -256,6 +291,7 @@ class _AuditSubscriber:
         "bag.diverted": ("diversion", "sorter"),
         "bag.recheck_enqueued": ("recheck", "recheck"),
         "flight.closed": ("flight_close", "audit"),
+        "flight.schedule_revised": ("schedule_revision", "audit"),
         "chute.assigned": ("chute_assign", "chute"),
         "belt.switched": ("belt_switch", "belt"),
         "bag.remapped": ("remap", "checkin"),

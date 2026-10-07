@@ -234,6 +234,11 @@ def handle_get_schedule(server, request: Request) -> Response:
     return json_response(_plant(server).schedule.current(request.param("id")).as_dict())
 
 
+def handle_schedule_history(server, request: Request) -> Response:
+    records = _plant(server).schedule_history.records(request.param("id"))
+    return json_response([revision.as_dict() for revision in records])
+
+
 def handle_flight_bags(server, request: Request) -> Response:
     bags = _plant(server).book.list_bags_for(request.param("id"))
     return json_response([bag.as_dict() for bag in bags])
@@ -349,7 +354,7 @@ def handle_assign_chute(server, request: Request) -> Response:
 
 
 def handle_reassign_chute(server, request: Request) -> Response:
-    assignment = _plant(server).chutes.reassign(
+    assignment = _plant(server).assign_chute(
         request.required("flight_id"), request.required("chute_id")
     )
     return json_response(assignment.as_dict())
@@ -380,15 +385,64 @@ def handle_get_assignment(server, request: Request) -> Response:
 
 
 def handle_assignment_history(server, request: Request) -> Response:
-    history = _plant(server).chute_history.for_flight(request.param("flight"))
-    return json_response([assignment.as_dict() for assignment in history])
+    records = _plant(server).chute_history.records(request.param("flight"))
+    return json_response([record.as_dict() for record in records])
 
 
 def handle_confirm_assignment(server, request: Request) -> Response:
-    assignment = _plant(server).chutes.ensure_current(
+    plant = _plant(server)
+    assignment, verdict = plant.chutes.ensure_current(
         request.param("flight"), request.int_field("generation")
     )
-    return json_response({"confirmed": True, **assignment.as_dict()})
+    payload: dict[str, object] = {"confirmed": True, **assignment.as_dict()}
+    if verdict is not None:
+        # The guard adopted the current generation; the prompt must say so and
+        # its versions must be exactly the ones the response was served with.
+        payload["adopted"] = True
+        payload["notice"] = verdict.notice
+        payload["held_generation"] = verdict.held_generation
+        payload["current_generation"] = verdict.current_generation
+        payload["policy"] = verdict.policy
+    else:
+        payload["adopted"] = False
+    return json_response(payload)
+
+
+def handle_generations(server, request: Request) -> Response:
+    """The two versioned streams side by side, so they can be cross-checked."""
+
+    plant = _plant(server)
+    flight_id = request.param("id")
+    assignment = plant.chutes.current(flight_id)
+    schedule = plant.schedule.current(flight_id)
+    return json_response(
+        {
+            "flight_id": flight_id,
+            "chute_assignment": assignment.as_dict() if assignment else None,
+            "flight_schedule": schedule.as_dict(),
+            "chute_generations": [
+                item.generation for item in plant.chute_history.for_flight(flight_id)
+            ],
+            "schedule_generations": [
+                revision.generation for revision in plant.schedule_history.records(flight_id)
+            ],
+            "cross_check": (
+                "assignment.schedule_generation must be <= schedule.generation; "
+                "the assignment row is stamped with the schedule it was planned "
+                "against, so a smaller number reveals a plan based on an old "
+                "cutoff"
+            ),
+        }
+    )
+
+
+def handle_generation_policy(server, request: Request) -> Response:
+    return json_response(_plant(server).generation_policy())
+
+
+def handle_set_generation_policy(server, request: Request) -> Response:
+    mode = request.str_field("mode")
+    return json_response(_plant(server).set_generation_policy(mode))
 
 
 # ---------------------------------------------------------------------------
@@ -539,15 +593,24 @@ def handle_recheck_deadline(server, request: Request) -> Response:
     plant = _plant(server)
     flight_id = request.param("flight")
     generation = request.query_int("generation", 0)
+    adopted = False
+    verdict = None
     if generation:
-        plant.schedule.ensure_current(flight_id, generation)
-    return json_response(
-        {
-            "flight_id": flight_id,
-            "deadline": plant.recheck.deadline(flight_id),
-            "schedule": plant.schedule.current(flight_id).as_dict(),
-        }
-    )
+        _flight, verdict = plant.schedule.ensure_current(flight_id, generation)
+        adopted = verdict is not None
+    current = plant.schedule.current(flight_id)
+    payload: dict[str, object] = {
+        "flight_id": flight_id,
+        "deadline": plant.recheck.deadline(flight_id),
+        "schedule": current.as_dict(),
+        "adopted": adopted,
+    }
+    if verdict is not None:
+        payload["notice"] = verdict.notice
+        payload["held_generation"] = verdict.held_generation
+        payload["current_generation"] = verdict.current_generation
+        payload["policy"] = verdict.policy
+    return json_response(payload)
 
 
 def handle_recheck_clear(server, request: Request) -> Response:

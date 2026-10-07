@@ -25,7 +25,9 @@ def test_reassignment_bumps_the_generation(plant, flight):
 def test_confirm_rejects_a_stale_generation(plant, flight):
     plant.chutes.assign(flight.id, "T1-CHA")
     plant.chutes.assign(flight.id, "T1-CHB")
-    assert plant.chutes.ensure_current(flight.id, 2).chute_id == "T1-CHB"
+    assignment, verdict = plant.chutes.ensure_current(flight.id, 2)
+    assert assignment.chute_id == "T1-CHB"
+    assert verdict is None
     with pytest.raises(StaleError):
         plant.chutes.ensure_current(flight.id, 1)
 

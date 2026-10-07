@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from bagsort.generations.policy import StaleVerdict
+
 
 class ControlError(Exception):
     """Base class for every error raised by the control service."""
 
     code = "control_error"
 
-    def as_dict(self) -> dict[str, str]:
-        return {"error": str(self), "code": self.code}
+    def __init__(self, message: str = "", details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.details = dict(details or {})
+
+    def as_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"error": str(self), "code": self.code}
+        if self.details:
+            payload["details"] = self.details
+        return payload
 
 
 class ValidationError(ControlError):
@@ -40,6 +52,14 @@ class StaleError(ControlError):
     """A generation, watermark or schedule reference is out of date."""
 
     code = "stale_reference"
+
+
+class StaleGenerationError(StaleError):
+    """A stale generation under the reject policy, carrying its full verdict."""
+
+    def __init__(self, verdict: "StaleVerdict") -> None:
+        super().__init__(verdict.reason, verdict.as_dict())
+        self.verdict = verdict
 
 
 class QuotaError(ControlError):

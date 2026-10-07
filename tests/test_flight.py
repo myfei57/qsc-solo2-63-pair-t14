@@ -80,7 +80,7 @@ def test_schedule_revision_bumps_the_generation(plant, flight):
     assert first.generation == 1
     revised = plant.schedule.revise(flight.id, "2024-01-02T00:00:00Z")
     assert revised.generation == 2
-    assert plant.schedule.ensure_current(flight.id, 2).cutoff_at == "2024-01-02T00:00:00Z"
+    assert plant.schedule.ensure_current(flight.id, 2)[0].cutoff_at == "2024-01-02T00:00:00Z"
     with pytest.raises(StaleError):
         plant.schedule.ensure_current(flight.id, 1)
 

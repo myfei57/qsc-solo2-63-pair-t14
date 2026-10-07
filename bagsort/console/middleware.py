@@ -7,13 +7,14 @@ from typing import Callable
 
 from bagsort.errors import (
     ConflictError,
+    ControlError,
     NotFoundError,
     OrderingError,
     QuotaError,
     StaleError,
     ValidationError,
 )
-from .http import RequestError, Response, error_response
+from .http import RequestError, Response, json_response
 
 LOGGER = logging.getLogger("bagsort.console")
 
@@ -41,4 +42,6 @@ def guarded(call: Callable[[], Response]) -> Response:
         status = status_for(exc)
         if status >= 500:
             LOGGER.exception("unhandled console failure")
-        return error_response(status, str(exc))
+        if isinstance(exc, ControlError):
+            return json_response(exc.as_dict(), status=status)
+        return json_response({"error": str(exc), "code": "internal_error"}, status=status)
